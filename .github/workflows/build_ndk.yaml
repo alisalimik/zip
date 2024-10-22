@@ -74,9 +74,30 @@ jobs:
     - name: Archive Library and Headers for ABI ${{ matrix.abi }}
       run: |
         mkdir -p build-android-${{ matrix.abi }}/lib
-        cp build-android-${{ matrix.abi }}/*.a build-android-${{ matrix.abi }}/lib/
+        
+        # Check for static libraries and copy them if they exist
+        if ls build-android-${{ matrix.abi }}/*.a 1> /dev/null 2>&1; then
+          cp build-android-${{ matrix.abi }}/*.a build-android-${{ matrix.abi }}/lib/
+        else
+          echo "No static libraries (.a files) found for ABI ${{ matrix.abi }}"
+        fi
+        
+        # Check for shared libraries and copy them if they exist
+        if ls build-android-${{ matrix.abi }}/*.so 1> /dev/null 2>&1; then
+          cp build-android-${{ matrix.abi }}/*.so build-android-${{ matrix.abi }}/lib/
+        else
+          echo "No shared libraries (.so files) found for ABI ${{ matrix.abi }}"
+        fi
+        
         mkdir -p build-android-${{ matrix.abi }}/include
-        cp -R include/* build-android-${{ matrix.abi }}/include/
+        
+        # Check if the include directory has files and copy if it exists
+        if [ -d "include" ] && [ "$(ls -A include)" ]; then
+          cp -R include/* build-android-${{ matrix.abi }}/include/
+        else
+          echo "No header files found in include directory for ABI ${{ matrix.abi }}"
+        fi
+        
         cd build-android-${{ matrix.abi }} && zip -r android-build-${{ matrix.abi }}.zip lib include
 
     - name: Upload Artifacts for ABI ${{ matrix.abi }}
