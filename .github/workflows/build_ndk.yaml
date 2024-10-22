@@ -5,42 +5,82 @@ on: [push, pull_request]
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86, x86_64] # Define ABIs to build
     steps:
     - uses: actions/checkout@v2
-    - name: Install Android NDK
-      run: sudo apt-get -y install android-sdk cmake ninja-build
-    - name: Set up Android NDK
+
+    - name: Cache Android SDK
+      uses: actions/cache@v3
+      with:
+        path: |
+          $HOME/.android
+          /opt/android-sdk
+        key: ${{ runner.os }}-android-sdk-${{ hashFiles('**/CMakeLists.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-android-sdk-
+
+    - name: Cache Android NDK
+      uses: actions/cache@v3
+      with:
+        path: |
+          /opt/android-sdk/ndk/android-ndk-r27b
+        key: ${{ runner.os }}-android-ndk-${{ hashFiles('**/CMakeLists.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-android-ndk-
+
+    - name: Install Android SDK and CMake
+      run: |
+        sudo apt-get -y install android-sdk cmake ninja-build
+
+    - name: Set up Android SDK and NDK
       env:
         ANDROID_NDK_VERSION: r27b
       run: |
-        sudo mkdir -p /opt/android-sdk/ndk
-        curl -sSL "https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK_VERSION}-linux.zip" -o android-ndk.zip
-        sudo unzip android-ndk.zip -d /opt/android-sdk/ndk
-        export ANDROID_NDK_HOME="/opt/android-sdk/ndk/android-ndk-${ANDROID_NDK_VERSION}"
-        echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
-    - name: Configure for Android
+        # Setup Android SDK
+        if [ ! -d "/opt/android-sdk" ]; then
+          sudo mkdir -p /opt/android-sdk
+        fi
+
+        # Setup Android NDK
+        if [ ! -d "/opt/android-sdk/ndk/android-ndk-${ANDROID_NDK_VERSION}" ]; then
+          curl -sSL "https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK_VERSION}-linux.zip" -o android-ndk.zip
+          sudo unzip android-ndk.zip -d /opt/android-sdk/ndk
+          export ANDROID_NDK_HOME="/opt/android-sdk/ndk/android-ndk-${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+        else
+          echo "NDK already exists, skipping download."
+          export ANDROID_NDK_HOME="/opt/android-sdk/ndk/android-ndk-${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+        fi
+
+    - name: Configure for Android ABI ${{ matrix.abi }}
       run: |
         cmake -DCMAKE_DISABLE_TESTING=ON -DCMAKE_ENABLE_SANITIZERS=OFF \
               -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake \
-              -DANDROID_ABI=arm64-v8a \
+              -DANDROID_ABI=${{ matrix.abi }} \
               -DANDROID_PLATFORM=android-15 \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_C_FLAGS_RELEASE="-fdata-sections -ffunction-sections" \
               -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384" \
               -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384" \
-              -S . -B build-android -GNinja
-    - name: Build for Android
+              -S . -B build-android-${{ matrix.abi }} -GNinja
+
+    - name: Build for Android ABI ${{ matrix.abi }}
       run: |
-        cmake --build build-android --config Release
-    - name: Archive Library and Headers
+        cmake --build build-android-${{ matrix.abi }} --config Release
+
+    - name: Archive Library and Headers for ABI ${{ matrix.abi }}
       run: |
-        mkdir -p build-android/lib
-        cp build-android/*.so build-android/lib/
-        mkdir -p build-android/include
-        cp -R include/* build-android/include/
-        cd build-android && zip -r android-build.zip lib include
-    - name: Upload Artifacts
+        mkdir -p build-android-${{ matrix.abi }}/lib
+        cp build-android-${{ matrix.abi }}/*.a build-android-${{ matrix.abi }}/lib/
+        mkdir -p build-android-${{ matrix.abi }}/include
+        cp -R include/* build-android-${{ matrix.abi }}/include/
+        cd build-android-${{ matrix.abi }} && zip -r android-build-${{ matrix.abi }}.zip lib include
+
+    - name: Upload Artifacts for ABI ${{ matrix.abi }}
       uses: actions/upload-artifact@v3
       with:
-        name: android-build
-        path: build-android/android-build.zip
+        name: android-build-${{ matrix.abi }}
+        path: build-android-${{ matrix.abi }}/android-build-${{ matrix.abi }}.zip
